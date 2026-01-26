@@ -4,10 +4,10 @@ import (
 	"log"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/ReyviRahman/social/internal/db"
 	"github.com/ReyviRahman/social/internal/store"
-	"github.com/joho/godotenv"
 )
 
 func getEnvInt(key string, fallback int) int {
@@ -23,18 +23,16 @@ func getEnvInt(key string, fallback int) int {
 }
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
 	cfg := config{
 		addr: os.Getenv("ADDR"),
 		db: dbConfig{
-			addr:         os.Getenv("DB_ADDR"),
+			addr:         os.Getenv("DB_DSN"),
 			maxOpenConns: getEnvInt("DB_MAX_OPEN_CONNS", 30),
 			maxIdleConns: getEnvInt("DB_MAX_IDLE_CONNS", 30),
 			maxIdleTime:  os.Getenv("DB_MAX_IDLE_TIME"),
+		},
+		mail: mailConfig{
+			exp: time.Hour * 24 * 3,
 		},
 	}
 

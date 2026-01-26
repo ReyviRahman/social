@@ -1,0 +1,37 @@
+version: '3'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+  app:
+    image: cosmtrek/air
+    container_name: go_api_app
+    working_dir: /app
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      ADDR: :8080
+      DB_DSN: "host=db user=${DB_USER} password=${DB_PASSWORD} dbname=${DB_NAME} port=5432 sslmode=disable"
+      DB_MAX_OPEN_CONNS: 30
+      DB_MAX_IDLE_CONNS: 30
+      DB_MAX_IDLE_TIME: 15m
+    volumes:
+      - .:/app
+      - /app/tmp
+    depends_on:
+      - db
+    command: -c .air.toml
+
+volumes:
+  db_data:
