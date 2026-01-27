@@ -124,3 +124,30 @@ func getUserFromContext(r *http.Request) *store.User {
 	user, _ := r.Context().Value(userCtx).(*store.User)
 	return user
 }
+
+func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+
+	// 1. Panggil Store untuk Aktivasi
+	err := app.store.Users.Activate(r.Context(), token)
+	if err != nil {
+		switch err {
+		case store.ErrNotFound:
+			app.notFoundResponse(w, r, err)
+		default:
+			app.internalServerError(w, r, err)
+		}
+		return
+	}
+
+	// 2. Buat payload pesan sukses
+	// Kamu bisa kirim map sederhana atau struct
+	payload := map[string]string{
+		"message": "Akun kamu berhasil diaktifkan! Silakan login untuk melanjutkan.",
+	}
+
+	// 3. Kirim response dengan status 200 (OK)
+	if err := app.jsonResponse(w, http.StatusOK, payload); err != nil {
+		app.internalServerError(w, r, err)
+	}
+}
