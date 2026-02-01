@@ -5,15 +5,34 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ReyviRahman/social/internal/auth"
 	"github.com/ReyviRahman/social/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"go.uber.org/zap"
 )
 
 type config struct {
 	addr string
 	db   dbConfig
 	mail mailConfig
+	auth authConfig
+}
+
+type authConfig struct {
+	basic basicConfig
+	token tokenConfig
+}
+
+type tokenConfig struct {
+	secret string
+	exp    time.Duration
+	iss    string
+}
+
+type basicConfig struct {
+	user string
+	pass string
 }
 
 type mailConfig struct {
@@ -28,8 +47,10 @@ type dbConfig struct {
 }
 
 type application struct {
-	config config
-	store  store.Storage
+	config        config
+	store         store.Storage
+	logger        *zap.SugaredLogger
+	authenticator auth.Authenticator
 }
 
 func (app *application) mount() http.Handler {
@@ -47,33 +68,36 @@ func (app *application) mount() http.Handler {
 	})
 
 	r.Route("/posts", func(r chi.Router) {
+		r.Use(app.AuthTokenMiddleware)
 		r.Post("/", app.createPostHandler)
 
 		r.Route("/{postID}", func(r chi.Router) {
 			r.Use(app.postsContextMiddleware)
+
 			r.Get("/", app.getPostHandler)
-			r.Delete("/", app.deletePostHandler)
-			r.Patch("/", app.updatePostHandler)
+			r.Patch("/", app.checkPostOwnership("moderator", app.updatePostHandler))
+			r.Delete("/", app.checkPostOwnership("admin", app.deletePostHandler))
 		})
 	})
 
 	r.Route("/users", func(r chi.Router) {
 		r.Get("/activate/{token}", app.activateUserHandler)
 		r.Route("/{userID}", func(r chi.Router) {
-			r.Use(app.userContextMiddleware)
-
+			r.Use(app.AuthTokenMiddleware)
 			r.Get("/", app.getUserHandler)
 			r.Put("/follow", app.followUserHandler)
 			r.Put("/unfollow", app.unfollowUserHandler)
 		})
 
 		r.Group(func(r chi.Router) {
+			r.Use(app.AuthTokenMiddleware)
 			r.Get("/feed", app.getUserFeedHandler)
 		})
 	})
 
 	r.Route("/authentication", func(r chi.Router) {
 		r.Post("/user", app.registerUserHandler)
+		r.Post("/token", app.createTokenHandler)
 	})
 
 	return r
@@ -90,6 +114,8 @@ func (app *application) run(mux http.Handler) error {
 	}
 
 	log.Printf("server has started at %s", app.config.addr)
+
+	app.logger.Infow("server has started", "addr", app.config.addr)
 
 	return srv.ListenAndServe()
 }

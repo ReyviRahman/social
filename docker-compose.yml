@@ -16,6 +16,7 @@ services:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+
   app:
     image: cosmtrek/air
     container_name: go_api_app
@@ -30,6 +31,9 @@ services:
       DB_MAX_OPEN_CONNS: 30
       DB_MAX_IDLE_CONNS: 30
       DB_MAX_IDLE_TIME: 15m
+      AUTH_BASIC_USER: admin
+      AUTH_BASIC_PASS: admin
+      AUTH_TOKEN_SECRET: secret
     volumes:
       - .:/app
       - /app/tmp

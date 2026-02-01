@@ -6,8 +6,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ReyviRahman/social/internal/auth"
 	"github.com/ReyviRahman/social/internal/db"
 	"github.com/ReyviRahman/social/internal/store"
+	"go.uber.org/zap"
 )
 
 func getEnvInt(key string, fallback int) int {
@@ -34,7 +36,21 @@ func main() {
 		mail: mailConfig{
 			exp: time.Hour * 24 * 3,
 		},
+		auth: authConfig{
+			basic: basicConfig{
+				user: os.Getenv("AUTH_BASIC_USER"),
+				pass: os.Getenv("AUTH_BASIC_PASS"),
+			},
+			token: tokenConfig{
+				secret: os.Getenv("AUTH_TOKEN_SECRET"),
+				exp:    time.Hour * 24 * 3,
+				iss:    "gophersocial",
+			},
+		},
 	}
+
+	logger := zap.Must(zap.NewProduction()).Sugar()
+	defer logger.Sync()
 
 	db, err := db.New(
 		cfg.db.addr,
@@ -50,11 +66,19 @@ func main() {
 	log.Println("database connection pool established")
 	store := store.NewStorage(db)
 
+	jwtAuthenticator := auth.NewJWTAuthenticator(
+		cfg.auth.token.secret,
+		cfg.auth.token.iss,
+		cfg.auth.token.iss,
+	)
+
 	app := &application{
-		config: cfg,
-		store:  store,
+		config:        cfg,
+		store:         store,
+		logger:        logger,
+		authenticator: jwtAuthenticator,
 	}
 
 	mux := app.mount()
-	log.Fatal(app.run(mux))
+	logger.Fatal(app.run(mux))
 }

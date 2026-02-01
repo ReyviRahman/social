@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/lib/pq"
 )
@@ -22,7 +23,7 @@ type Post struct {
 
 type PostWithMetadata struct {
 	Post
-	CommentCount int `json:"comments_count"`
+	CommentsCount int `json:"comments_count"`
 }
 
 type PostStore struct {
@@ -120,32 +121,43 @@ func (s *PostStore) Update(ctx context.Context, post *Post) error {
 }
 
 func (s *PostStore) GetUserFeed(ctx context.Context, userID int64, fq PaginatedFeedQuery) ([]PostWithMetadata, error) {
-	query := `
-		SELECT 
-			p.id, p.user_id, p.title, p.content, p.created_at, p.version, p.tags,
-			u.username,
-			COUNT(c.id) AS comments_count
-		FROM posts p
-		LEFT JOIN comments c ON c.post_id = p.id
-		LEFT JOIN users u ON p.user_id = u.id
-		JOIN followers f ON f.follower_id = p.user_id OR p.user_id = $1
-		WHERE 
-			f.user_id = $1 AND
-			(p.title ILIKE '%' || $4 || '%' OR p.content ILIKE '%' || $4 || '%') AND
-			(p.tags @> $5 OR $5 = '{}')
-		GROUP BY p.id, u.username
-		ORDER BY p.created_at ` + fq.Sort + `
-		LIMIT $2 OFFSET $3
-	`
+	feed := []PostWithMetadata{}
 
-	rows, err := s.db.QueryContext(ctx, query, userID, fq.Limit, fq.Offset, fq.Search, pq.Array(fq.Tags))
+	query := `
+        SELECT 
+            p.id, p.user_id, p.title, p.content, p.created_at, p.tags,
+            u.username,
+            COUNT(c.id) AS comments_count
+        FROM posts p
+        INNER JOIN users u ON p.user_id = u.id
+        LEFT JOIN comments c ON c.post_id = p.id
+        WHERE 
+            (p.user_id = $1 OR EXISTS (
+                SELECT 1 FROM followers f WHERE f.user_id = $1 AND f.following_id = p.user_id
+            ))
+            AND (p.title ILIKE '%' || $4 || '%' OR p.content ILIKE '%' || $4 || '%')
+            AND (p.tags @> $5 OR $5 = '{}')
+        GROUP BY p.id, u.username
+        ORDER BY p.created_at ` + fq.Sort + `
+        LIMIT $2 OFFSET $3
+    `
+
+	// Context timeout bagus, pertahankan
+	ctx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+
+	// 2. Handling Tags agar tidak panic/error jika fq.Tags nil
+	tagsParam := pq.Array(fq.Tags)
+	if len(fq.Tags) == 0 {
+		tagsParam = pq.Array([]string{})
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, userID, fq.Limit, fq.Offset, fq.Search, tagsParam)
 	if err != nil {
 		return nil, err
 	}
-
 	defer rows.Close()
 
-	var feed []PostWithMetadata
 	for rows.Next() {
 		var p PostWithMetadata
 		err := rows.Scan(
@@ -154,16 +166,19 @@ func (s *PostStore) GetUserFeed(ctx context.Context, userID int64, fq PaginatedF
 			&p.Title,
 			&p.Content,
 			&p.CreatedAt,
-			&p.UpdatedAt,
 			pq.Array(&p.Tags),
 			&p.User.Username,
-			&p.CommentCount,
+			&p.CommentsCount,
 		)
 		if err != nil {
 			return nil, err
 		}
-
 		feed = append(feed, p)
+	}
+
+	// 3. Cek error setelah loop (Best Practice)
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 
 	return feed, nil
